@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Deep Dive: Daily Rare-Answer Trivia</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;color:#e8f6ff;background:#04243a}
+  canvas#bg{position:fixed;inset:0;width:100%;height:100%}
+  #app{position:relative;z-index:1;height:100%;display:flex;flex-direction:column}
+  header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 22px;max-width:1000px;width:100%;margin:0 auto}
+  .brand{font-weight:900;letter-spacing:4px;font-size:14px;opacity:.9}
+  .right{display:flex;align-items:center;gap:12px}
+  .depth{font-variant-numeric:tabular-nums;font-size:26px;font-weight:800;text-shadow:0 2px 10px #000a}
+  .depth small{font-size:14px;opacity:.6;margin-left:3px;font-weight:600}
+  main{flex:1;position:relative;display:flex;justify-content:center;align-items:center;padding:0 96px 0 24px}
+  #stage{width:100%;max-width:620px;display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center}
+  .count{font-size:12px;letter-spacing:3px;text-transform:uppercase;opacity:.6}
+  .prompt{font-size:clamp(26px,5vw,42px);font-weight:800;line-height:1.15;text-shadow:0 4px 24px #0008;min-height:1.2em;animation:rise .6s cubic-bezier(.2,1,.3,1)}
+  @keyframes rise{from{transform:translateY(18px);opacity:0}}
+  .timer{width:100%;height:8px;border-radius:8px;background:rgba(255,255,255,.14);overflow:hidden}
+  .timer i{display:block;width:100%;height:100%;border-radius:8px;background:linear-gradient(90deg,#7cf7ff,#8b7bff);transform-origin:left center}
+  .timer.low i{background:linear-gradient(90deg,#ffb347,#ff5e7e)}
+  form{display:flex;gap:10px;width:100%}
+  input{flex:1;min-width:0;font:inherit;font-size:20px;font-weight:600;padding:14px 18px;border-radius:16px;border:1px solid rgba(255,255,255,.22);background:rgba(0,10,25,.35);color:#fff;outline:none;text-align:center;transition:box-shadow .2s,border-color .2s}
+  input:focus{border-color:#7cf7ff;box-shadow:0 0 0 4px rgba(124,247,255,.18)}
+  input:disabled{opacity:.5}
+  button{font:inherit;font-weight:800;padding:14px 22px;border:none;border-radius:16px;background:linear-gradient(135deg,#7cf7ff,#8b7bff);color:#041f33;cursor:pointer;transition:transform .15s,opacity .2s;box-shadow:0 8px 24px #0005}
+  button:hover{transform:scale(1.04)}
+  button:disabled{opacity:.4;cursor:default;transform:none}
+  .ghost{padding:8px 12px;font-size:13px;background:rgba(255,255,255,.1);color:#fff;box-shadow:none;border-radius:12px}
+  .ghost.small{padding:12px 14px;font-size:13px}
+  #hintTxt{min-height:18px;font-size:14px;opacity:.85;color:#ffe066}
+  #feedback{min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+  .tier{font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:900;padding:6px 14px;border-radius:999px;animation:stamp .55s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes stamp{from{transform:scale(2.2) rotate(-8deg);opacity:0}}
+  .gain{font-size:52px;font-weight:900;font-variant-numeric:tabular-nums;animation:rise .5s;text-shadow:0 4px 20px #0007}
+  .msg{opacity:.8;font-size:15px}
+  #pips{display:flex;gap:4px}
+  #pips i{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 5px;transition:background .3s}
+  .rail{position:absolute;right:22px;top:90px;bottom:60px;width:70px}
+  .rail::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;transform:translateX(-50%);background:linear-gradient(#7cf7ff88,#ff5ec888)}
+  .tick{position:absolute;left:0;transform:translateY(-50%);font-size:11px;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .krill{position:absolute;left:50%;top:0;width:46px;transform:translate(-50%,-50%);filter:drop-shadow(0 0 8px #ff7b6baa)}
+  .overlay{position:fixed;inset:0;z-index:5;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(0,8,20,.5);backdrop-filter:blur(6px)}
+  .overlay.on{display:flex;animation:fade .4s ease}
+  @keyframes fade{from{opacity:0}}
+  .card{width:100%;max-width:520px;max-height:90vh;overflow:auto;background:rgba(6,26,46,.9);border:1px solid rgba(124,247,255,.2);border-radius:24px;padding:28px;box-shadow:0 30px 80px #000a;animation:pop .6s cubic-bezier(.2,1.4,.4,1);text-align:center}
+  @keyframes pop{from{transform:scale(.88) translateY(12px);opacity:0}}
+  h1{margin:0 0 6px;font-size:40px;letter-spacing:2px;font-weight:900;background:linear-gradient(90deg,#7cf7ff,#8b7bff,#ff5ec8,#7cf7ff);background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 5s linear infinite}
+  @keyframes shine{to{background-position:200% center}}
+  .card p{opacity:.8;line-height:1.5;margin:10px 0}
+  .small{font-size:13px;opacity:.55}
+  .tiers{display:grid;grid-template-columns:1fr auto;gap:6px 14px;text-align:left;margin:16px 0;font-size:14px}
+  .tiers b{font-weight:800}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}
+  .grid b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
+  .grid span{font-size:12px;opacity:.6}
+  .rows{margin:16px 0;text-align:left}
+  .row{display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:14px}
+  .row .q{opacity:.6;font-size:12px}
+  .row .a{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .t{font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;white-space:nowrap}
+  .row .p{font-weight:900;font-variant-numeric:tabular-nums;min-width:30px;text-align:right}
+  .big{font-size:56px;font-weight:900;font-variant-numeric:tabular-nums;margin:6px 0}
+  .cta{margin-top:14px;width:100%}
+  @media (max-width:600px){
+    main{padding:0 60px 0 14px}
+    .rail{right:8px;width:50px}
+    .tick{font-size:9px}
+    .krill{width:34px}
+    .row{grid-template-columns:1fr auto auto}
+    .row .q{display:none}
+    .brand{font-size:12px}
+  }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<div id="app">
+  <header>
+    <div class="brand">DEEP DIVE</div>
+    <div class="right">
+      <button class="ghost" id="statsBtn" type="button">Stats</button>
+      <button class="ghost" id="snd" type="button" title="Sound">🔊</button>
+      <div class="depth"><span id="depthNum">0</span><small>m</small></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="rail" id="rail">
+      <div class="krill" id="krill">
+        <svg viewBox="0 0 64 28" width="46" height="20" aria-hidden="true">
+          <path d="M4 14 Q22 2 46 10 L60 6 L56 14 L60 22 L46 18 Q22 26 4 14Z" fill="#ff7b6b"/>
+          <path d="M14 14 L22 6 M22 14 L30 6 M30 14 L38 6" stroke="#ffc2b5" stroke-width="1.6" fill="none"/>
+          <circle cx="46" cy="12" r="2.2" fill="#041f33"/>
+        </svg>
+      </div>
+    </div>
+
+    <div id="stage">
+      <div class="count" id="count"></div>
+      <div class="prompt" id="prompt"></div>
+      <div class="timer" id="timer"><i></i></div>
+      <form id="form" autocomplete="off">
+        <input id="ans" placeholder="Type one answer…" maxlength="40">
+        <button class="ghost small" id="hint" type="button">Hint</button>
+        <button id="go" type="submit">Dive</button>
+      </form>
+      <div id="hintTxt"></div>
+      <div id="feedback"></div>
+      <div id="pips"></div>
+    </div>
+  </main>
+
+  <div class="overlay" id="overlay"><div class="card" id="card"></div></div>
+</div>
+
+<script>
+// ---------- Content ----------
+const TIERS = {
+  o: { name: 'One in a Krillion', pts: 100, c: '#ff5ec8', e: '🟣', f: [1047, 1319, 1568] },
+  d: { name: 'Deep Cut',          pts: 85,  c: '#ff9b6b', e: '🟠', f: [988, 1175] },
+  r: { name: 'Rare',              pts: 60,  c: '#ffe066', e: '🟡', f: [784, 988] },
+  s: { name: 'Schooler',          pts: 30,  c: '#7cff9b', e: '🟢', f: [659, 784] },
+  p: { name: 'Plankton',          pts: 10,  c: '#9fe6ff', e: '🔵', f: [523] }
+};
+const ORDER = ['o', 'd', 'r', 's', 'p'];
+const HINT_COST = 5; // points (50 m)
+// Answers separated by | are aliases.
+const DEFAULT_BANK = [
+  { q: 'Name a pasta shape',
+    p: ['Spaghetti','Penne','Fusilli','Rigatoni','Farfalle|Bow ties','Macaroni','Linguine','Lasagne|Lasagna','Fettuccine'],
+    s: ['Orecchiette','Orzo','Ziti','Conchiglie|Shells','Cavatappi','Radiatori','Rotini'],
+    r: ['Campanelle','Gemelli','Trofie','Bucatini','Ditalini','Strozzapreti'],
+    d: ['Casarecce','Malloreddus','Cappelletti','Agnolotti'],
+    o: ['Pizzoccheri','Sagnarelli','Lorighittas'] },
+  { q: 'Name a bird that cannot fly',
+    p: ['Ostrich','Penguin','Emu','Kiwi','Dodo'],
+    s: ['Cassowary','Rhea','Moa'],
+    r: ['Kakapo','Takahe|Takahē','Weka','Great auk'],
+    d: ['Kagu','Steamer duck','Flightless cormorant'],
+    o: ['Inaccessible Island rail','Auckland Islands teal'] },
+  { q: 'Name a card game',
+    p: ['Poker','Bridge','Uno','Solitaire|Patience','Blackjack','Hearts','Rummy'],
+    s: ['Cribbage','Euchre','Spades','Canasta','Gin rummy','Pinochle'],
+    r: ['Bezique','Piquet','Belote','Skat','Ecarte|Écarté','Faro'],
+    d: ['Cassino|Casino','Nap','Speculation','Loo'],
+    o: ['Durak','Commerce','Chouette'] },
+  { q: 'Name a river in Scotland',
+    p: ['Clyde','Tay','Spey','Dee'],
+    s: ['Tweed','Forth','Don','Ness','Earn'],
+    r: ['Nith','Teviot','Deveron','Findhorn','Lossie'],
+    d: ['Ythan','Carron','Annan','Irvine','Esk'],
+    o: ['Oykel','Cree','Lochy'] },
+  { q: 'Name a cheese',
+    p: ['Cheddar','Brie','Gouda','Feta','Mozzarella','Parmesan','Camembert'],
+    s: ['Gruyere|Gruyère','Emmental|Emmenthal','Halloumi','Stilton','Edam','Manchego'],
+    r: ['Taleggio','Comte|Comté','Raclette','Pecorino','Fontina','Gorgonzola'],
+    d: ['Caciocavallo','Reblochon','Munster','Vacherin','Crowdie'],
+    o: ['Cabrales','Sbrinz','Bitto'] },
+  { q: 'Name a Shakespeare villain',
+    p: ['Iago','Shylock','Claudius','Edmund','Richard III|Richard','Goneril'],
+    s: ['Tybalt','Aaron','Malvolio','Cassius'],
+    r: ['Don John','Cloten','Angelo','Oswald'],
+    d: ['Tamora','Regan','Cornwall'],
+    o: ['Iachimo','Aufidius'] },
+  { q: 'Name a Greek letter',
+    p: ['Alpha','Beta','Gamma','Delta','Epsilon','Pi','Omega'],
+    s: ['Theta','Lambda','Sigma','Kappa','Psi','Zeta','Eta'],
+    r: ['Xi','Tau','Upsilon','Rho','Iota','Chi','Phi'],
+    d: ['Digamma','Koppa|Qoppa','Stigma'],
+    o: ['Sampi','Heta'] },
+  { q: 'Name a Scottish dish',
+    p: ['Haggis','Porridge','Shortbread','Tablet'],
+    s: ['Cullen skink|Skink','Cranachan','Clootie dumpling|Clootie','Arbroath smokie|Smokie','Scotch broth'],
+    r: ['Stovies','Skirlie','Bridies','Partan bree','Rumbledethumps'],
+    d: ['Cock-a-leekie|Cock a leekie','Forfar bridie','Powsowdie','Atholl brose|Athole brose'],
+    o: ['Crappit heids|Crappit heid','Sowens'] },
+  { q: 'Name a sea creature',
+    p: ['Jellyfish','Starfish','Octopus','Shark','Crab','Seahorse','Whale'],
+    s: ['Nautilus','Narwhal','Manatee','Sea otter','Pufferfish|Puffer fish'],
+    r: ['Cuttlefish','Sea cucumber','Barnacle','Limpet','Krill'],
+    d: ['Sea pig','Comb jelly|Sea gooseberry','Siphonophore','Sea slug|Nudibranch'],
+    o: ['Pyrosome','Salp'] },
+  { q: 'Name a board game',
+    p: ['Chess','Monopoly','Scrabble','Risk','Checkers|Draughts','Backgammon','Clue|Cluedo'],
+    s: ['Go','Mahjong','Catan|Settlers of Catan','Ludo','Othello|Reversi'],
+    r: ['Mancala','Nine men morris','Halma','Shogi','Tafl'],
+    d: ['Pachisi','Hnefatafl','Tablut','Fox and geese'],
+    o: ['Senet','Mehen'] },
+  { q: 'Name a Charles Dickens novel',
+    p: ['Oliver Twist','Hard Times','Great Expectations','Bleak House','David Copperfield'],
+    s: ['Little Dorrit','Our Mutual Friend','A Tale of Two Cities'],
+    r: ['Barnaby Rudge','Martin Chuzzlewit','Nicholas Nickleby','Pickwick Papers','Dombey and Son'],
+    d: ['Old Curiosity Shop|The Old Curiosity Shop','Edwin Drood|The Mystery of Edwin Drood'],
+    o: ['Sketches by Boz','Uncommercial Traveller|The Uncommercial Traveller'] },
+  { q: 'Name a dog breed',
+    p: ['Labrador','Poodle','Beagle','Boxer','Bulldog','Dachshund','Collie'],
+    s: ['Whippet','Samoyed','Vizsla','Saluki'],
+    r: ['Lurcher','Azawakh','Kuvasz','Puli'],
+    d: ['Otterhound','Harrier','Sloughi'],
+    o: ['Lagotto Romagnolo','Thai Ridgeback'] },
+  { q: 'Name a Scottish mountain',
+    p: ['Ben Nevis','Ben Lomond','Schiehallion'],
+    s: ['Ben Macdui','Cairn Gorm','Lochnagar','Ben Lawers','Ben More'],
+    r: ['Beinn Eighe','Liathach','Suilven','Stac Pollaidh','Sgurr nan Gillean'],
+    d: ['Ladhar Bheinn','Beinn Alligin','Sgurr Alasdair'],
+    o: ['Bidean nam Bian','An Teallach'] },
+  { q: 'Name a type of cloud',
+    p: ['Cumulus','Cirrus','Stratus','Cumulonimbus'],
+    s: ['Altostratus','Nimbostratus','Cirrocumulus','Altocumulus'],
+    r: ['Stratocumulus','Cirrostratus','Pileus'],
+    d: ['Lenticular','Mammatus','Pannus'],
+    o: ['Asperitas','Noctilucent'] },
+  { q: 'Name a knot',
+    p: ['Reef knot|Square knot','Bowline','Clove hitch','Overhand knot|Overhand'],
+    s: ['Sheet bend','Figure of eight|Figure eight','Half hitch','Timber hitch'],
+    r: ['Prusik','Munter hitch','Trucker hitch|Trucker’s hitch','Carrick bend'],
+    d: ['Monkey fist|Monkey’s fist','Turk’s head|Turks head','Sheepshank'],
+    o: ['Blood knot','Alpine butterfly'] },
+  { q: 'Name a Scottish whisky distillery',
+    p: ['Glenfiddich','Macallan','Laphroaig','Talisker','Glenlivet','Lagavulin','Ardbeg'],
+    s: ['Balvenie','Glenmorangie','Bowmore','Oban','Dalmore'],
+    r: ['Tomatin','Benriach','Aberlour','Glenallachie','Ardmore'],
+    d: ['Bunnahabhain','Kilchoman','Glenglassaugh','Tobermory'],
+    o: ['Ledaig','Deanston','Tullibardine'] },
+  { q: 'Name a tea',
+    p: ['Green','Black','Earl Grey','Chai','Herbal'],
+    s: ['Oolong','Matcha','Assam','Darjeeling','Lapsang souchong'],
+    r: ['Rooibos','Pu-erh','Gunpowder','Keemun','Sencha'],
+    d: ['Hojicha','Genmaicha','Tieguanyin','Dian hong'],
+    o: ['Kukicha','Bancha'] },
+  { q: 'Name a fictional detective',
+    p: ['Sherlock Holmes','Poirot','Miss Marple|Marple','Columbo','Morse'],
+    s: ['Maigret','Wexford','Rebus','Lestrade'],
+    r: ['Cadfael|Brother Cadfael','Bosch','Alleyn','Lord Peter Wimsey|Wimsey'],
+    d: ['Dupin','Fandorin','Father Brown'],
+    o: ['Thorndyke','Martin Beck|Beck'] },
+  { q: 'Name a dinosaur',
+    p: ['Tyrannosaurus|T Rex|T-Rex','Stegosaurus','Triceratops','Velociraptor','Brontosaurus','Diplodocus'],
+    s: ['Ankylosaurus','Spinosaurus','Iguanodon','Allosaurus','Pachycephalosaurus'],
+    r: ['Parasaurolophus','Dilophosaurus','Compsognathus','Therizinosaurus','Carnotaurus'],
+    d: ['Oviraptor','Baryonyx','Utahraptor','Mamenchisaurus'],
+    o: ['Ouranosaurus','Irritator'] },
+  { q: 'Name a Pixar film',
+    p: ['Toy Story','Up','Cars','Coco','Brave','Soul'],
+    s: ['Ratatouille','WALL-E|Wall E','Monsters Inc','Inside Out','Luca'],
+    r: ['Onward','Turning Red','Finding Dory','Cars 2'],
+    d: ['Elemental','Lightyear','A Bugs Life|Bugs Life'],
+    o: ['Partly Cloudy','Geri’s Game|Geris Game'] }
+];
+// Uses the database saved by answer-db.html (same site, same browser) if there is one.
+const BANK = (() => {
+  try { return JSON.parse(localStorage.getItem('dd-db')) || DEFAULT_BANK; }
+  catch (e) { return DEFAULT_BANK; }
+})();
+const TIME = 25000;
+const MAXD = 7000;
+
+// ---------- Helpers ----------
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[(Math.random() * a.length) | 0];
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function norm(s){
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[’']/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(the|a|an) /, '');
+}
+function singular(s){ return s.length > 3 && s.endsWith('s') && !s.endsWith('ss') ? s.slice(0, -1) : s; }
+function forms(ans){ return ans.split('|').map(a => singular(norm(a))); }
+function lev(a, b){
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 1) return 9;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++){
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+// Word-level match: "Emperor penguin" matches "Penguin", "Peter Wimsey" matches "Lord Peter Wimsey".
+function looseMatch(text, ans){
+  const tt = norm(text).split(' ').filter(Boolean).map(singular);
+  if (!tt.length || !tt.some(w => w.length >= 4)) return false;
+  for (const alias of ans.split('|')){
+    const at = norm(alias).split(' ').filter(Boolean).map(singular);
+    if (!at.length) continue;
+    const typedInAnswer = tt.every(w => w.length < 4 || at.includes(w));
+    const answerInTyped = at.every(w => tt.includes(w));
+    if (typedInAnswer || answerInTyped) return true;
+  }
+  return false;
+}
+function logUnlisted(p, text){
+  try {
+    const L = JSON.parse(localStorage.getItem('dd-unlisted') || '[]');
+    L.push({ q: p.q, a: text.trim(), d: KEY });
+    localStorage.setItem('dd-unlisted', JSON.stringify(L.slice(-300)));
+  } catch (e) {}
+}
+function matchTier(p, text){
+  const sn = singular(norm(text));
+  if (!sn) return null;
+  for (const k of ORDER) for (const ans of p[k]) if (forms(ans).includes(sn)) return { tier: k, fuzzy: false };
+  for (const k of ORDER) for (const ans of p[k]) for (const f of forms(ans))
+    if (f.length >= 5 && lev(sn, f) <= 1) return { tier: k, fuzzy: true };
+  for (const k of ORDER) for (const ans of p[k]) if (looseMatch(text, ans)) return { tier: k, fuzzy: false };
+  return null;
+}
+function hash(str){ let h = 2166136261; for (const c of str){ h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed){
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const dayStr = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const todayKey = () => dayStr(new Date());
+const dayBefore = key => {
+  const [y, m, d] = key.split('-').map(Number);
+  return dayStr(new Date(y, m - 1, d - 1));
+};
+function dailyPrompts(key){
+  const r = rng(hash(key));
+  const idx = BANK.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--){
+    const j = Math.floor(r() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, 7).map(i => BANK[i]);
+}
+
+// ---------- Storage ----------
+const KEY = todayKey();
+let prompts = dailyPrompts(KEY);
+let st;
+try { st = JSON.parse(localStorage.getItem('deepdive') || 'null'); } catch (e) { st = null; }
+if (!st || st.date !== KEY) st = { date: KEY, results: [] };
+const save = () => { if (st.practice) return; try { localStorage.setItem('deepdive', JSON.stringify(st)); } catch (e) {} };
+const totalPts = () => st.results.reduce((s, r) => s + r.pts, 0);
+function getStats(){
+  try { return JSON.parse(localStorage.getItem('dd-stats')) || { played: 0, streak: 0, best: 0, total: 0, last: '' }; }
+  catch (e) { return { played: 0, streak: 0, best: 0, total: 0, last: '' }; }
+}
+let muted = localStorage.getItem('dd-mute') === '1';
+
+let idx = st.results.length, running = false, deadline = 0;
+let target = totalPts() * 10, shown = target;
+
+// ---------- Sound ----------
+let AC = null;
+function blip(f, d = .18){
+  if (muted) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    const o = AC.createOscillator(), gn = AC.createGain();
+    o.type = 'triangle'; o.frequency.value = f;
+    gn.gain.setValueAtTime(.12, AC.currentTime);
+    gn.gain.exponentialRampToValueAtTime(.001, AC.currentTime + d);
+    o.connect(gn).connect(AC.destination); o.start(); o.stop(AC.currentTime + d);
+  } catch (e) {}
+}
+function playTier(tier){
+  TIERS[tier].f.forEach((f, i) => setTimeout(() => blip(f), i * 110));
+}
+
+// ---------- Background canvas ----------
+const bg = $('bg'), g = bg.getContext('2d');
+let bubbles = [], confetti = [], time = 0, last = performance.now();
+function resizeBg(){ bg.width = innerWidth * DPR; bg.height = innerHeight * DPR; }
+addEventListener('resize', resizeBg); resizeBg();
+
+const SURF = [70, 190, 225], MID = [20, 110, 160], DEEP = [2, 6, 16];
+const lerpC = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+function burstBubbles(n){
+  for (let i = 0; i < n; i++)
+    bubbles.push({ x: innerWidth * rnd(.15, .85), y: innerHeight * rnd(.6, 1) + 20, r: rnd(2, 6), s: rnd(120, 260), w: rnd(0, 6) });
+  if (bubbles.length > 300) bubbles.splice(0, bubbles.length - 300);
+}
+function burstConfetti(n){
+  const cols = ['#ff5ec8', '#ffe066', '#7cf7ff', '#7cff9b', '#ff9b6b'];
+  for (let i = 0; i < n; i++)
+    confetti.push({ x: innerWidth / 2, y: innerHeight * .4, vx: rnd(-320, 320), vy: rnd(-460, -120), r: rnd(0, 6.28), vr: rnd(-9, 9), c: pick(cols), life: 1 });
+}
+
+function frame(now){
+  const dt = Math.min((now - last) / 1000, .05); last = now; time += dt;
+
+  shown += (target - shown) * Math.min(1, dt * 1.6);
+  if (Math.abs(target - shown) < .05) shown = target;
+  const f = clamp(shown / MAXD, 0, 1);
+
+  const W = innerWidth, H = innerHeight;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, rgb(lerpC(SURF, DEEP, Math.pow(f, .6))));
+  grad.addColorStop(.6, rgb(lerpC(MID, DEEP, Math.min(1, f * 1.2))));
+  grad.addColorStop(1, rgb(lerpC(MID, DEEP, Math.min(1, f * 1.3))));
+  g.fillStyle = grad; g.fillRect(0, 0, W, H);
+
+  if (f < .95){
+    g.fillStyle = `rgba(223,248,255,${(1 - f) * .10})`;
+    for (let i = 0; i < 4; i++){
+      const x = W * (.12 + i * .24) + Math.sin(time * .3 + i) * 40;
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 110, 0); g.lineTo(x + 280, H); g.lineTo(x + 150, H); g.closePath(); g.fill();
+    }
+  }
+
+  if (Math.random() < dt * 5 && bubbles.length < 200)
+    bubbles.push({ x: Math.random() * W, y: H + 10, r: rnd(1.5, 4.5), s: rnd(30, 80), w: rnd(0, 6.28) });
+  g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1;
+  for (const b of bubbles){
+    b.y -= b.s * dt; b.x += Math.sin(time * 2 + b.w) * 12 * dt;
+    g.beginPath(); g.arc(b.x, b.y, b.r, 0, 6.283); g.stroke();
+  }
+  bubbles = bubbles.filter(b => b.y > -10);
+
+  for (const c of confetti){
+    c.vy += 600 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.r += c.vr * dt; c.life -= dt * .5;
+    g.save(); g.globalAlpha = Math.max(0, c.life); g.translate(c.x, c.y); g.rotate(c.r);
+    g.fillStyle = c.c; g.fillRect(-5, -2.5, 10, 5); g.restore();
+  }
+  confetti = confetti.filter(c => c.life > 0);
+
+  $('depthNum').textContent = Math.round(shown).toLocaleString();
+  const k = $('krill');
+  k.style.top = (f * 100) + '%';
+  k.style.transform = `translate(-50%,-50%) rotate(${Math.sin(time * 6) * 8}deg)`;
+
+  if (running){
+    const rem = (deadline - performance.now()) / TIME;
+    const bar = $('timer');
+    bar.querySelector('i').style.transform = `scaleX(${clamp(rem, 0, 1)})`;
+    bar.classList.toggle('low', rem < .3);
+    if (rem <= 0) submit('');
+  }
+
+  requestAnimationFrame(frame);
+}
+
+// ---------- Game flow ----------
+function renderPips(){
+  $('pips').innerHTML = Array.from({ length: 7 }, (_, i) => {
+    const r = st.results[i];
+    const c = r ? (r.tier ? TIERS[r.tier].c : '#ff6b6b') : 'rgba(255,255,255,.2)';
+    const cur = i === idx && running ? ';outline:2px solid #fff;outline-offset:3px' : '';
+    return `<i style="background:${c}${cur}"></i>`;
+  }).join('');
+}
+
+function showHint(){
+  const has = st.hint && st.hint.q === idx;
+  $('hintTxt').textContent = has
+    ? `Starts with “${st.hint.a[0].toUpperCase()}”, ${st.hint.a.replace(/[^A-Za-z]/g, '').length} letters · −${HINT_COST * 10} m`
+    : '';
+  $('hint').disabled = !!has || !running;
+}
+
+function showPrompt(){
+  running = true;
+  const p = prompts[idx];
+  $('count').textContent = `Prompt ${idx + 1} of 7${st.practice ? ' · Practice' : ''}`;
+  const pe = $('prompt');
+  pe.style.animation = 'none'; void pe.offsetWidth; pe.style.animation = '';
+  pe.textContent = p.q;
+  $('feedback').innerHTML = '';
+  const input = $('ans');
+  input.value = ''; input.disabled = false; $('go').disabled = false;
+  input.focus();
+  deadline = performance.now() + TIME;
+  $('overlay').classList.remove('on');
+  renderPips(); showHint();
+}
+
+function submit(text){
+  if (!running) return;
+  running = false;
+  const p = prompts[idx];
+  const n = singular(norm(text));
+  let tier = null, fuzzy = false, msg = '';
+  if (!n) msg = 'Out of air.';
+  else if (st.results.some(r => r.n === n)) msg = 'You already dived that one. 0 m.';
+  else {
+    const m = matchTier(p, text);
+    if (m){ tier = m.tier; fuzzy = m.fuzzy; }
+    else { msg = 'Not in our list yet, so it scores 0 m. Logged for review.'; logUnlisted(p, text); }
+  }
+  const hinted = !!(st.hint && st.hint.q === idx);
+  let pts = tier ? TIERS[tier].pts : 0;
+  if (hinted && pts) pts = Math.max(0, pts - HINT_COST);
+  st.results.push({ q: idx, text: text.trim(), n, tier, pts, hint: hinted });
+  save();
+
+  $('ans').disabled = true; $('go').disabled = true; $('hint').disabled = true;
+  reveal(tier, pts, msg, fuzzy, hinted);
+  target = totalPts() * 10;
+  if (tier){
+    playTier(tier);
+    if (tier === 'o'){ burstBubbles(70); burstConfetti(140); }
+    else burstBubbles(22);
+  } else { blip(196, .3); burstBubbles(4); }
+
+  setTimeout(() => {
+    idx++;
+    renderPips();
+    if (idx >= 7) showResults(); else showPrompt();
+  }, 2600);
+}
+
+function reveal(tier, pts, msg, fuzzy, hinted){
+  const fb = $('feedback');
+  if (tier){
+    const t = TIERS[tier];
+    fb.innerHTML =
+      `<span class="tier" style="background:${t.c};color:#041f33">${t.name}</span>` +
+      `<div class="gain" style="color:${t.c}">+${pts * 10}m</div>` +
+      `<div class="msg">${fuzzy ? 'Typo corrected. ' : ''}${hinted ? 'Hint cost applied. ' : ''}Rarer answers dive deeper.</div>`;
+  } else {
+    fb.innerHTML = `<div class="gain" style="color:#ff8a8a;font-size:34px">0 m</div><div class="msg">${msg}</div>`;
+  }
+  renderPips();
+}
+
+$('hint').onclick = () => {
+  if (!running || (st.hint && st.hint.q === idx)) return;
+  const p = prompts[idx];
+  const all = ORDER.flatMap(k => p[k].map(a => a.split('|')[0]));
+  st.hint = { q: idx, a: pick(all) };
+  save(); showHint();
+  $('ans').focus();
+};
+
+$('form').addEventListener('submit', e => { e.preventDefault(); submit($('ans').value); });
+
+// ---------- Overlays ----------
+function openOverlay(html){
+  $('card').innerHTML = html;
+  $('overlay').classList.add('on');
+}
+$('overlay').addEventListener('click', e => {
+  if (e.target === $('overlay') && !running && st.results.length) $('overlay').classList.remove('on');
+});
+
+function showIntro(){
+  openOverlay(`
+    <h1>DEEP DIVE</h1>
+    <p>Seven open-ended prompts. 25 seconds each. Type one answer.</p>
+    <div class="tiers">
+      <span>${TIERS.o.e} One in a Krillion</span><b>100 pts</b>
+      <span>${TIERS.d.e} Deep Cut</span><b>85 pts</b>
+      <span>${TIERS.r.e} Rare</span><b>60 pts</b>
+      <span>${TIERS.s.e} Schooler</span><b>30 pts</b>
+      <span>${TIERS.p.e} Plankton</span><b>10 pts</b>
+    </div>
+    <p class="small">Every point dives you 10 meters. Hints cost 50 m. Everyone gets the same seven prompts today.</p>
+    <button class="cta" id="start">Start dive</button>`);
+  $('start').onclick = () => { idx = 0; showPrompt(); };
+}
+
+function showStats(){
+  const s = getStats();
+  openOverlay(`
+    <h1>STATS</h1>
+    <div class="grid">
+      <div><b>${s.played}</b><span>Played</span></div>
+      <div><b>${s.streak}</b><span>Day streak</span></div>
+      <div><b>${s.best.toLocaleString()}</b><span>Best m</span></div>
+      <div><b>${s.played ? Math.round(s.total / s.played).toLocaleString() : 0}</b><span>Avg m</span></div>
+    </div>
+    <button class="cta" id="close">Close</button>`);
+  $('close').onclick = () => $('overlay').classList.remove('on');
+}
+
+function showResults(){
+  running = false;
+  target = totalPts() * 10;
+  const total = totalPts();
+  if (!st.counted && !st.practice){
+    const s = getStats();
+    s.streak = s.last === dayBefore(KEY) ? s.streak + 1 : (s.last === KEY ? s.streak : 1);
+    s.last = KEY; s.played++; s.total += total * 10; s.best = Math.max(s.best, total * 10);
+    try { localStorage.setItem('dd-stats', JSON.stringify(s)); } catch (e) {}
+    st.counted = true; save();
+  }
+  const rows = st.results.map((r, i) => {
+    const t = r.tier ? TIERS[r.tier] : null;
+    return `<div class="row">
+      <span class="q">${esc(prompts[i].q)}</span>
+      <span class="a">${r.text ? esc(r.text) : '—'}</span>
+      <span class="t" style="color:${t ? t.c : '#ff8a8a'}">${t ? t.name : 'Missed'}</span>
+      <span class="p">${r.pts}</span></div>`;
+  }).join('');
+  openOverlay(`
+    <h1>DIVE COMPLETE</h1>
+    <div class="big">${(total * 10).toLocaleString()} m</div>
+    <p class="small">${KEY} · ${total} points · ${getStats().streak}-day streak</p>
+    <div class="rows">${rows}</div>
+    <button class="cta" id="share">Copy result</button>
+    <button class="cta" id="again" style="background:linear-gradient(135deg,#ffe066,#ff9b6b)">Play again (random set)</button>
+    <p class="small">New prompts at midnight, local time.</p>`);
+  $('share').onclick = () => {
+    const grid = st.results.map(r => r.tier ? TIERS[r.tier].e : '⚫').join('');
+    const text = `Deep Dive ${KEY}: ${total * 10} m\n${grid}`;
+    const done = () => { $('share').textContent = 'Copied!'; };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done);
+    else done();
+  };
+  renderPips();
+}
+
+// ---------- Practice / replay ----------
+function newPractice(){
+  const ids = BANK.map((_, i) => i);
+  for (let i = ids.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  prompts = ids.slice(0, 7).map(i => BANK[i]);
+  st = { date: KEY, results: [], practice: true };
+  idx = 0; target = 0; running = false;
+  showPrompt();
+}
+$('card').addEventListener('click', e => { if (e.target.id === 'again') newPractice(); });
+
+// ---------- Init ----------
+$('statsBtn').onclick = showStats;
+const sndBtn = $('snd');
+const paintSnd = () => { sndBtn.textContent = muted ? '🔇' : '🔊'; };
+sndBtn.onclick = () => {
+  muted = !muted;
+  try { localStorage.setItem('dd-mute', muted ? '1' : '0'); } catch (e) {}
+  paintSnd();
+};
+paintSnd();
+
+$('rail').insertAdjacentHTML('afterbegin', Array.from({ length: 8 }, (_, k) =>
+  `<div class="tick" style="top:${k / 7 * 100}%">${(k * 1000).toLocaleString()}m</div>`).join(''));
+$('krill').style.top = (clamp(shown / MAXD, 0, 1) * 100) + '%';
+
+if (st.results.length >= 7) showResults();
+else if (st.results.length === 0) showIntro();
+else { idx = st.results.length; showPrompt(); }
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

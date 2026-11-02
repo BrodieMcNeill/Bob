@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deep Dive: Answer Database</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#0b1624;color:#e8f6ff;padding:20px}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{margin:0 0 4px;font-size:24px}
+  h2{font-size:13px;letter-spacing:1.5px;text-transform:uppercase;opacity:.7;margin:0 0 10px}
+  .muted{opacity:.6;font-size:13px;line-height:1.5}
+  .panel{background:#12243a;border:1px solid #23406a;border-radius:14px;padding:16px;margin-top:16px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select{font:inherit;background:#0a1320;color:#fff;border:1px solid #2d5080;border-radius:10px;padding:10px 12px}
+  input{flex:1;min-width:180px}
+  button{font:inherit;font-weight:700;background:#7cf7ff;color:#04203a;border:none;border-radius:10px;padding:10px 14px;cursor:pointer}
+  button.alt{background:#23406a;color:#e8f6ff}
+  button.x{background:transparent;color:#ff8a8a;padding:4px 8px}
+  .item{padding:9px 0;border-bottom:1px solid #1e3554;display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:14px}
+  .item .sub{font-size:12px;opacity:.6}
+  .tag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;color:#04203a;white-space:nowrap}
+  #status{font-size:13px;opacity:.75;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Deep Dive: Answer Database</h1>
+  <div class="muted">Search answers, check new ones, and review what players typed. Changes are saved in this browser and the game uses them when it is hosted on the same site. Keep this file in the same folder as <b>deep-dive-v2.html</b>.</div>
+  <div id="status">Loading…</div>
+
+  <div class="panel">
+    <h2>Search answers</h2>
+    <input id="search" placeholder="Search any answer or prompt…" style="width:100%">
+    <div id="results" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Check a new answer</h2>
+    <div class="row">
+      <select id="cPrompt" style="flex:1;min-width:200px"></select>
+      <input id="cText" placeholder="Type an answer to check">
+      <button id="cBtn">Check</button>
+    </div>
+    <div id="cOut" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Answers players typed that aren't listed</h2>
+    <div class="row">
+      <button class="alt" id="loadLog">Load log</button>
+      <button class="alt" id="clearLog">Clear log</button>
+    </div>
+    <div id="log" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Database</h2>
+    <div class="row">
+      <button id="exportBtn">Copy JSON</button>
+      <button class="alt" id="resetBtn">Reset to game defaults</button>
+    </div>
+    <div id="counts" class="muted" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<script>
+const TIERS = {
+  o: ['One in a Krillion', '#ff5ec8'], d: ['Deep Cut', '#ff9b6b'], r: ['Rare', '#ffe066'],
+  s: ['Schooler', '#7cff9b'], p: ['Plankton', '#9fe6ff']
+};
+const ORDER = ['o', 'd', 'r', 's', 'p'];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+let BANK = [];
+let cand = [];
+
+// ---------- Matching (same rules as the game) ----------
+function norm(s){
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[’']/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(the|a|an) /, '');
+}
+function singular(s){ return s.length > 3 && s.endsWith('s') && !s.endsWith('ss') ? s.slice(0, -1) : s; }
+function forms(ans){ return ans.split('|').map(a => singular(norm(a))); }
+function looseMatch(text, ans){
+  const tt = norm(text).split(' ').filter(Boolean).map(singular);
+  if (!tt.length || !tt.some(w => w.length >= 4)) return false;
+  for (const alias of ans.split('|')){
+    const at = norm(alias).split(' ').filter(Boolean).map(singular);
+    if (!at.length) continue;
+    if (tt.every(w => w.length < 4 || at.includes(w)) || at.every(w => tt.includes(w))) return true;
+  }
+  return false;
+}
+function findTier(p, text){
+  const sn = singular(norm(text));
+  if (!sn) return null;
+  for (const k of ORDER) for (const a of p[k]) if (forms(a).includes(sn)) return k;
+  for (const k of ORDER) for (const a of p[k]) if (looseMatch(text, a)) return k;
+  return null;
+}
+
+// ---------- Data ----------
+function persist(){ try { localStorage.setItem('dd-db', JSON.stringify(BANK)); } catch (e) {} }
+
+async function load(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('dd-db') || 'null');
+    if (saved){
+      BANK = saved;
+      $('status').textContent = `Using saved database: ${BANK.length} prompts`;
+    } else {
+      const html = await (await fetch('deep-dive-v2.html', { cache: 'no-store' })).text();
+      const m = html.match(/const DEFAULT_BANK = (\[[\s\S]*?\n\]);/);
+      if (!m) throw new Error('no bank');
+      BANK = new Function('return ' + m[1])();
+      $('status').textContent = `Loaded ${BANK.length} prompts from deep-dive-v2.html`;
+    }
+  } catch (e) {
+    BANK = [];
+    $('status').textContent = 'Could not load deep-dive-v2.html. Keep both files in the same folder and open the site over https (not from a file on your computer).';
+  }
+  $('cPrompt').innerHTML = BANK.map((p, i) => `<option value="${i}">${esc(p.q)}</option>`).join('');
+  renderCounts();
+}
+
+function renderCounts(){
+  $('counts').innerHTML = BANK.map(p =>
+    `${esc(p.q)}: ${ORDER.map(k => `${TIERS[k][0]} ${p[k].length}`).join(' · ')}`
+  ).join('<br>');
+}
+
+// ---------- Search ----------
+function renderSearch(){
+  const q = singular(norm($('search').value));
+  if (!q){ $('results').innerHTML = ''; return; }
+  const hits = [];
+  BANK.forEach((p, pi) => ORDER.forEach(k => p[k].forEach((a, ai) => {
+    if (norm(a.replace(/\|/g, ' ') + ' ' + p.q).includes(q)) hits.push({ pi, k, ai, a });
+  })));
+  $('results').innerHTML = hits.slice(0, 60).map(h =>
+    `<div class="item"><div><div>${esc(h.a.replace(/\|/g, ' / '))}</div><div class="sub">${esc(BANK[h.pi].q)}</div></div>
+     <div class="row"><span class="tag" style="background:${TIERS[h.k][1]}">${TIERS[h.k][0]}</span>
+     <button class="x" data-rm="${h.pi}|${h.k}|${h.ai}" title="Remove">✕</button></div></div>`
+  ).join('') || '<div class="muted">No matches.</div>';
+}
+$('search').addEventListener('input', renderSearch);
+$('results').addEventListener('click', e => {
+  const t = e.target.dataset.rm;
+  if (!t) return;
+  const [pi, k, ai] = t.split('|');
+  BANK[pi][k].splice(+ai, 1);
+  persist(); renderCounts(); renderSearch();
+});
+
+// ---------- Check a new answer ----------
+async function wikiTitles(q){
+  const url = 'https://en.wikipedia.org/w/api.php?action=opensearch&limit=6&namespace=0&format=json&origin=*&search=' + encodeURIComponent(q);
+  const r = await fetch(url);
+  return (await r.json())[1];
+}
+
+function runCheck(){
+  const pi = +$('cPrompt').value, text = $('cText').value.trim();
+  if (!text || !BANK[pi]) return;
+  const p = BANK[pi];
+  const hit = findTier(p, text);
+  if (hit){
+    $('cOut').innerHTML = `<div class="item"><span>Already listed: <b>${esc(text)}</b></span><span class="tag" style="background:${TIERS[hit][1]}">${TIERS[hit][0]}</span></div>`;
+    return;
+  }
+  $('cOut').innerHTML = `<div class="muted">Not listed under “${esc(p.q)}”. Looking on Wikipedia…</div>`;
+  wikiTitles(text).then(titles => {
+    cand = [text, ...titles.filter(t => t.toLowerCase() !== text.toLowerCase())];
+    const opts = ORDER.map(k => `<option value="${k}">${TIERS[k][0]}</option>`).join('');
+    $('cOut').innerHTML = `<div class="muted" style="margin-bottom:6px">Pick the best match and a tier. Check it really fits the prompt before adding.</div>` +
+      cand.map((t, i) => `<div class="item"><span>${esc(t)}</span>
+        <span class="row"><select data-sel="${i}">${opts}</select><button data-add="${i}">Add</button></span></div>`).join('');
+  }).catch(() => {
+    $('cOut').innerHTML = `<div class="muted">Wikipedia could not be reached. You can still add “${esc(text)}” manually.</div>
+      <div class="row" style="margin-top:8px"><select id="manTier">${ORDER.map(k => `<option value="${k}">${TIERS[k][0]}</option>`).join('')}</select>
+      <button id="manAdd">Add “${esc(text)}”</button></div>`;
+    $('manAdd').onclick = () => addAnswer(pi, $('manTier').value, text, 'Added.');
+  });
+}
+
+function addAnswer(pi, tier, text, note){
+  const name = text.replace(/\s*\(.*?\)\s*/g, '').trim();
+  BANK[pi][tier].push(name);
+  persist(); renderCounts(); renderSearch();
+  $('cOut').innerHTML = `<div class="muted">${note} “${esc(name)}” added to ${esc(BANK[pi].q)} as ${TIERS[tier][0]}.</div>`;
+}
+
+$('cBtn').onclick = runCheck;
+$('cText').addEventListener('keydown', e => { if (e.key === 'Enter') runCheck(); });
+$('cOut').addEventListener('click', e => {
+  const i = e.target.dataset.add;
+  if (i === undefined) return;
+  const sel = document.querySelector(`select[data-sel="${i}"]`);
+  addAnswer(+$('cPrompt').value, sel.value, cand[+i], 'Added.');
+});
+
+// ---------- Unlisted log from the game ----------
+function loadLog(){
+  let L = [];
+  try { L = JSON.parse(localStorage.getItem('dd-unlisted') || '[]'); } catch (e) {}
+  const groups = {};
+  for (const e of L){
+    const key = e.q + '||' + e.a.toLowerCase();
+    groups[key] = groups[key] || { q: e.q, a: e.a, n: 0 };
+    groups[key].n++;
+  }
+  const rows = Object.values(groups).sort((x, y) => y.n - x.n);
+  $('log').innerHTML = rows.map((g, i) => {
+    const pi = BANK.findIndex(p => p.q === g.q);
+    return `<div class="item"><div><div>${esc(g.a)}</div><div class="sub">${esc(g.q)} · typed ${g.n}×</div></div>
+      <button class="alt" data-check="${pi}|${esc(g.a)}">Check</button></div>`;
+  }).join('') || '<div class="muted">Nothing logged yet.</div>';
+}
+$('loadLog').onclick = loadLog;
+$('clearLog').onclick = () => { localStorage.removeItem('dd-unlisted'); $('log').innerHTML = ''; };
+$('log').addEventListener('click', e => {
+  const v = e.target.dataset.check;
+  if (!v) return;
+  const [pi, ...rest] = v.split('|');
+  $('cPrompt').value = pi;
+  $('cText').value = rest.join('|');
+  runCheck();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+// ---------- Export / reset ----------
+$('exportBtn').onclick = () => {
+  const text = JSON.stringify(BANK, null, 1);
+  const done = () => { $('exportBtn').textContent = 'Copied!'; };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done); else done();
+};
+$('resetBtn').onclick = () => {
+  if (!confirm('Remove your saved changes and go back to the game’s built-in answers?')) return;
+  localStorage.removeItem('dd-db');
+  location.reload();
+};
+
+load();
+</script>
+</body>
+</html>
